@@ -1,0 +1,61 @@
+version: '3.9'
+
+x-konga-config: &konga-env
+  NODE_ENV: ${NODE_ENV:-development}
+  TOKEN_SECRET: ${TOKEN_SECRET:-konga}
+  DB_ADAPTER: ${DB_ADAPTER:-postgres}
+  DB_HOST: db
+  DB_PORT: ${DB_PORT:-5432}
+  DB_USER: ${DB_USER:-konga}
+  DB_PASSWORD: ${DB_PASSWORD:-konga}
+  DB_DATABASE: ${DB_DATABASE:-konga}
+
+volumes:
+  konga_data: {}
+  konga_tmp_vol:
+    driver_opts:
+     type: tmpfs
+     device: tmpfs
+
+services:
+  konga-prepare:
+    image: "${KONGA_DOCKER_TAG:-pantsel/konga}"
+    command: -c prepare -a ${DB_ADAPTER:-postgres} -u postgresql://${DB_USER:-konga}:${DB_PASSWORD:-konga}@db:${DB_PORT:-5432}/${DB_DATABASE:-konga}
+    profiles: ["database"]
+    depends_on:
+      - db
+    environment:
+      <<: *konga-env
+    restart: on-failure
+
+  konga:
+    image: "${KONGA_DOCKER_TAG:-pantsel/konga}"
+    environment:
+      <<: *konga-env
+    ports:
+      # The following two environment variables default to an insecure value (0.0.0.0)
+      # according to the CIS Security test.
+      - "${KONGA_INBOUND_LISTEN:-0.0.0.0}:1337:1337/tcp"
+    restart: on-failure:5
+    volumes:
+      - konga_tmp_vol:/tmp
+    security_opt:
+      - no-new-privileges
+
+  db:
+    image: postgres:9.6
+    profiles: ["database"]
+    environment:
+      POSTGRES_DB: ${DB_DATABASE:-konga}
+      POSTGRES_USER: ${DB_USER:-konga}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-konga}
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "${DB_USER:-konga}"]
+      interval: 30s
+      timeout: 30s
+      retries: 3
+    restart: on-failure
+    stdin_open: true
+    tty: true
+    volumes:
+      - konga_data:/var/lib/postgresql/data
